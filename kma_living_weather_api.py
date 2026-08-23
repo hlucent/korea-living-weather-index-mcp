@@ -3,6 +3,9 @@
 
 - fetch_uv_forecast: getUVIdxV5 (자외선지수, h0~h75, 26개 필드)
 - fetch_air_diffusion_forecast: getAirDiffusionIdxV5 (대기정체지수, h3~h78, 26개 필드)
+
+행정안전부 생활안전지도(IF_0113) 실측 자외선지수 API는 별도 모듈
+`safemap_api.py`에 있다 (areaNo 코드 체계를 쓰지 않는 별개 API이므로 분리).
 """
 
 import os

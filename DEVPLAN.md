@@ -181,20 +181,31 @@ INFO-000/ERROR-3xx 문자열 코드 체계와는 다르다 — 프로젝트 지�
 
 ## 3. MCP 툴 설계
 
-**툴 개수: 3개** (오퍼레이션 2개 + 지점코드 검색 1개 — 기존
-`safemap-uv-index-mcp`와 동일한 패턴)
+**툴 개수: 4개** (오퍼레이션 2개 + 지점코드 검색 1개 + 행안부 실측 자외선지수
+1개 — `safemap-uv-index-mcp`의 `get_uv_index`를 이식해 통합)
 
-| 툴 이름 | 대응 오퍼레이션 | 설명 |
+| 툴 이름 | 대응 API | 설명 |
 |---|---|---|
-| `get_uv_forecast` | getUVIdxV5 | 지점코드+발표시간 기준 자외선지수 예보(0~75시간, 3시간 간격) |
-| `get_air_diffusion_forecast` | getAirDiffusionIdxV5 | 지점코드+발표시간 기준 대기정체지수 예보(3~78시간, 3시간 간격) |
+| `get_uv_forecast` | 기상청 `getUVIdxV5` | 지점코드+발표시간 기준 자외선지수 예보(0~75시간, 3시간 간격) |
+| `get_air_diffusion_forecast` | 기상청 `getAirDiffusionIdxV5` | 지점코드+발표시간 기준 대기정체지수 예보(3~78시간, 3시간 간격) |
 | `search_area_code` | (자체 기능, API 아님) | 지역명으로 areaNo 검색 (기존 MCP의 `search_uv_area_code`와 동일 로직) |
+| `get_uv_index` | 행안부 생활안전지도 `IF_0113` | 시/도·시/군/구 기준 실측/현재 자외선지수 (`safemap-uv-index-mcp`에서 이식) |
 
 **설계 근거**: "API 1개 = MCP 1개, 최소 툴 개수" 조언(1-4절)에 따라, 같은
 API(`LivingWthrIdxServiceV5`)의 두 오퍼레이션을 하나의 MCP로 묶었다.
 제공기관·활용신청 단위가 동일(기상청, 공공데이터포털 단일 인증키)하고,
 사용자가 "생활기상지수"라는 통합된 이름으로 MCP를 켜고 끄고 싶어하므로
 분리보다 통합이 자연스럽다고 판단했다.
+
+**`get_uv_index` 추가 근거 및 주의사항**: 사용자 요청으로
+`safemap-uv-index-mcp`의 `get_uv_index`(행안부 생활안전지도 IF_0113, 실측/현재
+자외선지수)를 이 MCP로 이식했다. **이 API는 `getUVIdxV5`/`getAirDiffusionIdxV5`와
+전혀 다른 코드 체계를 쓴다** — `areaNo`(지점코드)가 아니라 `ctprvn_nm`/
+`signgu_nm`(시도명/시군구명 문자열)로 요청·응답이 이뤄지며, 서버 자체에
+지역 필터 파라미터가 없어 전국조회 후 클라이언트 사이드 필터링을 한다(실측
+확인, `safemap-uv-index-mcp` DEVLOG 참고). 따라서 `area_codes.json`의
+`areaNo`와는 매핑되지 않으므로, `search_area_code`가 반환하는 코드를
+`get_uv_index`에 재사용할 수 없다. 인증키도 별도(`SAFEMAP_API_KEY`)다.
 
 ## 4. 기술 스택
 
@@ -249,7 +260,8 @@ korea-living-weather-index-mcp/
 
 ## 8. 환경변수
 
-- ENV_KEY: KMA_LIVING_WEATHER_SERVICE_KEY
+- ENV_KEY: KMA_LIVING_WEATHER_SERVICE_KEY (기상청 생활기상지수 4.0)
+- ENV_KEY: SAFEMAP_API_KEY (행안부 생활안전지도 IF_0113, `get_uv_index` 이식으로 추가)
 
 ## 9. 저장소 설명(Description 제안)
 

@@ -3,6 +3,8 @@
 - get_uv_forecast: 자외선지수 예보(getUVIdxV5, h0~h75)
 - get_air_diffusion_forecast: 대기정체지수 예보(getAirDiffusionIdxV5, h3~h78)
 - search_area_code: 지역명으로 areaNo 검색
+- get_uv_index: 행정안전부 생활안전지도(IF_0113) 실측/현재 자외선지수
+  (safemap-uv-index-mcp에서 이식. areaNo 코드 체계를 쓰지 않는 별개 API임에 주의)
 """
 
 import os
@@ -23,6 +25,11 @@ from kma_living_weather_api import (
     fetch_uv_forecast,
     fetch_air_diffusion_forecast,
     LivingWeatherApiError,
+)
+from safemap_api import (
+    fetch_uv_index,
+    SafemapApiError,
+    _safe_int,
 )
 
 load_dotenv()
@@ -296,6 +303,75 @@ async def get_air_diffusion_forecast(
     if area_no is None and area_name:
         out["area_resolution_note"] = err_or_note
     return out
+
+
+@mcp.tool()
+async def get_uv_index(
+    sido: str | None = None,
+    sigungu: str | None = None,
+    page_no: int = 1,
+    num_of_rows: int = 300,
+) -> dict:
+    """행정안전부 생활안전지도(기상청 제공) 자외선지수를 시도/시군구 기준으로 조회한다.
+
+    이 API는 기상청 생활기상지수(4.0, get_uv_forecast/get_air_diffusion_forecast)와는
+    별개의 API로, areaNo 코드 체계를 쓰지 않는다(응답이 ctprvn_nm/signgu_nm
+    문자열로만 옴). 서버 자체에 지역 필터 파라미터가 없어(실측 확인됨) 전국
+    데이터를 조회한 뒤 sido/sigungu 값으로 클라이언트 사이드 필터링을 수행한다.
+
+    Args:
+        sido: 시도명으로 결과를 필터링한다 (예: "서울", "경기"). 부분 일치.
+        sigungu: 시군구명으로 결과를 필터링한다 (예: "강남구"). 부분 일치.
+        page_no: 지역 필터 없이 전체를 페이징 조회할 때 사용하는 페이지 번호 (기본 1).
+        num_of_rows: 한 번에 가져올 결과 수 (기본 300, 전국 시군구 수는 약 269개).
+
+    Returns:
+        dict:
+            - total_count: API가 보고한 전체 데이터 개수(페이지 기준, 필터 적용 전)
+            - filtered_count: 필터 적용 후 반환된 항목 수
+            - items: 각 항목은 다음 필드를 포함한다.
+                - ctprvn_nm: 시도명
+                - signgu_nm: 시군구명
+                - emd_nm: 읍면동명 (실측 결과 항상 빈 문자열로 확인됨)
+                - ulvry_index: 자외선지수 값 (정수, 실측 결과 0~9 등급 형태의 숫자로 확인됨)
+                - occrrnc_dt: 발생일시 (실측 포맷: YYYYMMDDHH, 예: "2026072109")
+    """
+    try:
+        result = await fetch_uv_index(num_of_rows=num_of_rows, page_no=page_no)
+    except SafemapApiError as e:
+        return {
+            "error": True,
+            "resultCode": e.result_code,
+            "resultMsg": e.result_msg,
+        }
+
+    items = result.get("items") or []
+
+    def matches(item):
+        if sido and sido not in (item.get("ctprvn_nm") or ""):
+            return False
+        if sigungu and sigungu not in (item.get("signgu_nm") or ""):
+            return False
+        return True
+
+    filtered = [item for item in items if matches(item)]
+
+    normalized = [
+        {
+            "ctprvn_nm": item.get("ctprvn_nm"),
+            "signgu_nm": item.get("signgu_nm"),
+            "emd_nm": item.get("emd_nm"),
+            "ulvry_index": _safe_int(item.get("ulvry_index")),
+            "occrrnc_dt": item.get("occrrnc_dt"),
+        }
+        for item in filtered
+    ]
+
+    return {
+        "total_count": _safe_int(result.get("totalCount")),
+        "filtered_count": len(normalized),
+        "items": normalized,
+    }
 
 
 app = mcp.http_app(stateless_http=True, middleware=[Middleware(RateLimitMiddleware)])

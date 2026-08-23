@@ -3,10 +3,13 @@
 기상청이 공공데이터포털을 통해 제공하는 **생활기상지수 조회서비스(4.0)**
 (`LivingWthrIdxServiceV5`)를 MCP로 구현한 서버입니다. **자외선지수**와
 **대기정체지수** 예보를 전국 약 3,838개 지점(시군구~읍면동 단위) 기준으로
-3시간 간격, 최대 75~78시간 후까지 조회할 수 있습니다.
+3시간 간격, 최대 75~78시간 후까지 조회할 수 있습니다. 추가로 행정안전부
+생활안전지도(IF_0113)의 **실측/현재 자외선지수**도 함께 제공합니다.
 
-기존에 운영 중인 `safemap-uv-index-mcp`(행정안전부 생활안전지도 자외선지수 +
-기상청 예보)와는 별개의 프로젝트입니다.
+기존에 운영 중이던 `safemap-uv-index-mcp`(행정안전부 생활안전지도 자외선지수
++ 기상청 예보)의 `get_uv_index` 툴을 이 프로젝트로 이식해 통합했습니다. 두
+프로젝트가 겹치는 기능을 갖게 되어, `safemap-uv-index-mcp`는 더 이상
+독립적으로 확장하지 않고 이 MCP로 기능을 일원화하는 방향입니다.
 
 ## 제공 툴
 
@@ -38,11 +41,21 @@
 ### `search_area_code`
 지역명(시/도, 시/군/구, 읍/면/동)으로 지점코드(areaNo)를 검색합니다.
 
+### `get_uv_index`
+행정안전부 생활안전지도(IF_0113, 기상청 제공) 실측/현재 자외선지수를
+시/도·시/군/구 기준으로 조회합니다. `safemap-uv-index-mcp`에서 이식했습니다.
+
+> **주의**: 이 API는 위 세 툴과 다른 API이며 **`areaNo` 코드 체계를 쓰지
+> 않습니다**. 지역 필터 파라미터가 서버에 없어(실측 확인됨) 전국 데이터를
+> 가져온 뒤 `sido`/`sigungu` 텍스트로 클라이언트 사이드 필터링을 수행합니다.
+> 응답도 `ctprvn_nm`/`signgu_nm`(시도명/시군구명 문자열)로만 오며, `area_codes.json`의
+> `areaNo`와는 매핑되지 않습니다.
+
 ## 설치 및 실행
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env  # KMA_LIVING_WEATHER_SERVICE_KEY 값 입력
+cp .env.example .env  # KMA_LIVING_WEATHER_SERVICE_KEY, SAFEMAP_API_KEY 값 입력
 python server.py
 ```
 
@@ -51,6 +64,7 @@ python server.py
 | 변수명 | 설명 |
 |---|---|
 | `KMA_LIVING_WEATHER_SERVICE_KEY` | 공공데이터포털에서 발급받은 "기상청_생활기상지수 조회서비스(4.0)" 일반 인증키(Decoding) |
+| `SAFEMAP_API_KEY` | 행정안전부 생활안전지도(IF_0113) 오픈API 인증키 |
 
 ## 배포
 
@@ -58,7 +72,7 @@ fly.io에 배포합니다. 자세한 절차는 프로젝트 부트스트랩 문�
 
 ```bash
 fly launch --no-deploy
-fly secrets set KMA_LIVING_WEATHER_SERVICE_KEY=발급받은키
+fly secrets set KMA_LIVING_WEATHER_SERVICE_KEY=발급받은키 SAFEMAP_API_KEY=발급받은키
 flyctl deploy
 ```
 
@@ -67,10 +81,11 @@ flyctl deploy
 
 ## 데이터 출처
 
-- **제공기관**: 기상청
-- **플랫폼**: 공공데이터포털(data.go.kr)
-- **API명**: 생활기상지수 조회서비스(4.0) (`LivingWthrIdxServiceV5`)
-- **라이선스**: 공공누리 (공공데이터포털 이용약관에 따름)
+- **제공기관**: 기상청 / 행정안전부
+- **플랫폼**: 공공데이터포털(data.go.kr) / 생활안전지도(safemap.go.kr)
+- **API명**: 생활기상지수 조회서비스(4.0) (`LivingWthrIdxServiceV5`),
+  생활안전지도 자외선지수(IF_0113)
+- **라이선스**: 공공누리 (각 플랫폼 이용약관에 따름)
 
 ## 알려진 제약사항 (실측 완료, 2026-08-23 기준)
 
@@ -90,5 +105,5 @@ flyctl deploy
 
 ## 관련 프로젝트
 
-- `safemap-uv-index-mcp` — 행정안전부 생활안전지도 + 기상청 자외선지수 예보
-  (기존 별도 운영 중)
+- `safemap-uv-index-mcp` — 이 프로젝트로 `get_uv_index` 기능이 이식되기 전
+  원본 프로젝트. 코드는 남아있으나 신규 기능 확장은 이 MCP로 통합됨.

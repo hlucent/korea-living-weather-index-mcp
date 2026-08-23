@@ -53,3 +53,34 @@
 - FastMCP 앱 임포트 및 3개 툴 등록 스모크 테스트 통과.
 - 정지 시점 도달: 코드 구현 + 로컬 실측 테스트 완료. fly.io 배포는 사용자가
   직접 진행 필요 (CLAUDE.md 절대 규칙에 따름).
+
+## 2026-08-23 — get_uv_index 이식, 2개 MCP를 하나로 통합
+
+- 사용자 요청으로 `safemap-uv-index-mcp`의 `get_uv_index`(행정안전부
+  생활안전지도 IF_0113, 실측/현재 자외선지수) 로직을 이 프로젝트로 그대로
+  이식함. 4번째 툴로 추가.
+- 구현: `safemap_api.py` 신규 파일로 IF_0113 호출/파싱 로직을 분리 이식
+  (`fetch_uv_index`, `SafemapApiError`, XML 폴백 파서 등 원본 그대로).
+  `server.py`에 `get_uv_index` 툴 등록.
+- **areaNo 코드 체계 확인 결과: 두 API가 다른 체계를 씀.**
+  `getUVIdxV5`/`getAirDiffusionIdxV5`(기상청 생활기상지수 4.0)는 `areaNo`
+  (지점코드)를 쓰지만, IF_0113(행안부 생활안전지도)은 `areaNo`를 전혀 쓰지
+  않고 `ctprvn_nm`/`signgu_nm`(시도명/시군구명 문자열) 기반으로만 조회한다.
+  서버 자체에 지역 필터 파라미터가 없어(원본 프로젝트에서 이미 실측 확인됨)
+  전국 데이터를 가져온 뒤 클라이언트 사이드에서 문자열 매칭한다. 따라서
+  `area_codes.json`/`search_area_code`의 `areaNo`를 `get_uv_index`에 재사용할
+  수 없음 — 별도 파라미터(`sido`, `sigungu`)로 필터링하도록 설계함.
+- 인증키도 별도(`SAFEMAP_API_KEY`, `.env`/`.env.example`에 추가)이며 기존
+  `KMA_LIVING_WEATHER_SERVICE_KEY`와 혼동하지 않도록 문서화함.
+- 로컬 실측 테스트: `get_uv_index(sido="서울", num_of_rows=300)` 호출 결과
+  total_count=269, filtered_count=26으로 정상 필터링 확인. 한글 데이터는
+  UTF-8로 정상 반환됨(터미널 출력에서만 코드페이지 문제로 깨져 보였던 것을
+  파일 저장으로 재확인).
+- DEVPLAN.md §3(툴 설계 4개로 갱신, areaNo 불일치 주의사항 명시), §8(환경변수
+  SAFEMAP_API_KEY 추가), README.md(4번째 툴 설명, 환경변수, 배포 안내,
+  관련 프로젝트 섹션) 갱신.
+- 두 MCP(`safemap-uv-index-mcp`, `korea-living-weather-index-mcp`)의 기능이
+  겹치게 되어, 향후 신규 기능은 이 MCP로 일원화하는 방향으로 정리함(원본
+  프로젝트는 코드 유지, 신규 확장 없음).
+- 정지 시점 도달: 코드 구현 + 로컬 실측 테스트 완료. fly.io 배포는 사용자가
+  직접 진행 필요 (CLAUDE.md 절대 규칙에 따름).
