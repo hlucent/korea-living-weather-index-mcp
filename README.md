@@ -105,5 +105,10 @@ flyctl deploy
 
 ## 관련 프로젝트
 
-- `safemap-uv-index-mcp` — 이 프로젝트로 `get_uv_index` 기능이 이식되기 전
-  원본 프로젝트. 코드는 남아있으나 신규 기능 확장은 이 MCP로 통합됨.
+- `safemap-uv-index-mcp` — 2026-08-23부로 **이 프로젝트에 흡수·통합됨**.
+  해당 프로젝트가 제공하던 `get_uv_index`(행안부 생활안전지도 자외선지수)와
+  `get_uv_forecast`, 지역코드 검색 기능이 모두 이 저장소로 이관되었으며,
+  대기정체지수 기능도 새로 추가되었다. `safemap-uv-index-mcp` 저장소는
+  참고용으로만 보관되고 fly.io 배포는 중단되었다. 앞으로 자외선지수·
+  대기정체지수 관련 신규 기능은 모두 이 저장소(korea-living-weather-index-mcp)
+  하나로 개발한다.
