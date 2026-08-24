@@ -69,6 +69,8 @@ def _get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+OAUTH_DISCOVERY_PATH = "/.well-known/oauth-protected-resource"
+
 # 서버 전용 접근 비밀키(MCP_ACCESS_KEY) 검사.
 # KMA_LIVING_WEATHER_SERVICE_KEY(기상청 업스트림 API 호출용)와는 별개의 키다 —
 # 이 키는 "이 MCP 서버 자체에 접근할 수 있는 사람인가"만 판별한다.
@@ -76,12 +78,14 @@ def _get_client_ip(request: Request) -> str:
 # 소모하지 않도록 한다(무단 접속 시도로 정상 사용자가 차단당하는 것을 방지).
 # /mcp와 /api/dashboard(PWA 대시보드용 REST 엔드포인트) 둘 다 적용 대상이다 —
 # 대시보드가 무인증으로 열려 있으면 /mcp 쪽을 막는 의미가 없어지기 때문.
+# OAUTH_DISCOVERY_PATH는 인증 대상에서 제외한다 — discovery 메타데이터는
+# 원래 공개적이어야 claude.ai 커넥터가 조회할 수 있다.
 AUTH_PROTECTED_PATHS = ("/mcp", "/api/dashboard")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.method == "OPTIONS":
+        if request.method == "OPTIONS" or request.url.path == OAUTH_DISCOVERY_PATH:
             return await call_next(request)
         if not any(request.url.path.startswith(p) for p in AUTH_PROTECTED_PATHS):
             return await call_next(request)
@@ -105,7 +109,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.method == "OPTIONS":
+        if request.method == "OPTIONS" or request.url.path == OAUTH_DISCOVERY_PATH:
             return await call_next(request)
 
         ip = _get_client_ip(request)
@@ -491,6 +495,27 @@ app = mcp.http_app(
     ],
 )
 app.router.routes.extend(extra_routes)
+
+
+async def oauth_protected_resource(request: Request) -> JSONResponse:
+    """RFC 9728 OAuth Protected Resource Metadata 스텁.
+
+    이 서버는 OAuth가 아니라 ?key= 쿼리 파라미터(MCP_ACCESS_KEY, AuthMiddleware
+    참고)로 접근을 제한한다. authorization_servers를 빈 배열로 반환해 "이
+    리소스에는 OAuth 인가 서버가 없다"는 것만 명시적으로 알려서, claude.ai
+    커넥터 등록 시 discovery 요청이 404로 실패해 재시도를 반복하며 rate
+    limit을 소진하는 것을 막는다. 이 엔드포인트 자체는 discovery 메타데이터라
+    AUTH_PROTECTED_PATHS에 포함하지 않고 공개로 둔다.
+    """
+    return JSONResponse(
+        {
+            "resource": str(request.base_url).rstrip("/"),
+            "authorization_servers": [],
+        }
+    )
+
+
+app.add_route(OAUTH_DISCOVERY_PATH, oauth_protected_resource, methods=["GET"])
 
 
 if __name__ == "__main__":
