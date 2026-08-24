@@ -84,3 +84,26 @@
   프로젝트는 코드 유지, 신규 확장 없음).
 - 정지 시점 도달: 코드 구현 + 로컬 실측 테스트 완료. fly.io 배포는 사용자가
   직접 진행 필요 (CLAUDE.md 절대 규칙에 따름).
+
+## 2026-08-24 — OAuth discovery 404로 인한 claude.ai 커넥터 등록 실패 대응
+
+- 증상: claude.ai에 이 MCP를 커넥터로 등록 시 실패. `curl`로
+  `/.well-known/oauth-protected-resource`를 직접 호출해보니 404 확인.
+- 원인 추정: 이 서버는 API 키 인증이 아니라 자체 인증이 없는 공개 서버라
+  OAuth 자체가 필요 없지만, claude.ai 커넥터 등록 과정이 관례적으로
+  OAuth Protected Resource discovery(RFC 9728)를 먼저 시도한다. 이 경로가
+  404를 반환하자 등록 로직이 반복 재시도하며 rate limit(분당 3회)까지
+  소진시켜 등록이 최종 실패하는 것으로 추정.
+- 조치 (`server.py`):
+  1. `/.well-known/oauth-protected-resource` GET 라우트를 `app.add_route`로
+     추가. RFC 9728 최소 형태로 `resource`(필수)와 `authorization_servers: []`
+     (인가 서버 없음 = 인증 불필요를 명시)를 담은 200 JSON 응답을 반환.
+  2. `RateLimitMiddleware.dispatch`에서 이 경로를 OPTIONS와 동일하게
+     카운팅 대상에서 제외(`OAUTH_DISCOVERY_PATH` 상수로 분리) — discovery
+     재시도 자체가 실제 요청의 rate limit을 갉아먹지 않도록 함.
+- 로컬 검증: `python server.py` 기동 후
+  `curl -i .../.well-known/oauth-protected-resource` → 200 확인
+  (기존 404 대비). 동일 경로 4회 연속 호출해도 전부 200 — 분당 3회
+  제한에 걸리지 않음을 확인(rate limit 제외 정상 동작).
+- 정지 시점 도달: 코드 수정 + 로컬 검증 완료. fly.io 재배포(`flyctl deploy`)는
+  사용자가 PowerShell에서 직접 진행 필요.

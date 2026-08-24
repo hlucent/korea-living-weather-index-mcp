@@ -65,9 +65,12 @@ def _get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+OAUTH_DISCOVERY_PATH = "/.well-known/oauth-protected-resource"
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.method == "OPTIONS":
+        if request.method == "OPTIONS" or request.url.path == OAUTH_DISCOVERY_PATH:
             return await call_next(request)
 
         ip = _get_client_ip(request)
@@ -375,6 +378,25 @@ async def get_uv_index(
 
 
 app = mcp.http_app(stateless_http=True, middleware=[Middleware(RateLimitMiddleware)])
+
+
+async def oauth_protected_resource(request: Request) -> JSONResponse:
+    """RFC 9728 OAuth Protected Resource Metadata 스텁.
+
+    이 서버는 인증이 필요 없는 공개 서버다. authorization_servers를 빈
+    배열로 반환해 "이 리소스에는 OAuth 인가 서버가 없다"는 것을 명시적으로
+    알려서, claude.ai 커넥터 등록 시 discovery 요청이 404로 실패해
+    재시도를 반복하며 rate limit을 소진하는 것을 막는다.
+    """
+    return JSONResponse(
+        {
+            "resource": str(request.base_url).rstrip("/"),
+            "authorization_servers": [],
+        }
+    )
+
+
+app.add_route(OAUTH_DISCOVERY_PATH, oauth_protected_resource, methods=["GET"])
 
 
 if __name__ == "__main__":
