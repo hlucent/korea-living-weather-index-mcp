@@ -7,6 +7,7 @@
   (safemap-uv-index-mcp에서 이식. areaNo 코드 체계를 쓰지 않는 별개 API임에 주의)
 """
 
+import hmac
 import os
 import time
 import json
@@ -18,8 +19,10 @@ from dotenv import load_dotenv
 from fastmcp import FastMCP
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 from kma_living_weather_api import (
     fetch_uv_forecast,
@@ -31,6 +34,7 @@ from safemap_api import (
     SafemapApiError,
     _safe_int,
 )
+from kakao_geocode_api import reverse_geocode, KakaoGeocodeApiError
 
 load_dotenv()
 
@@ -63,6 +67,40 @@ def _get_client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+# 서버 전용 접근 비밀키(MCP_ACCESS_KEY) 검사.
+# KMA_LIVING_WEATHER_SERVICE_KEY(기상청 업스트림 API 호출용)와는 별개의 키다 —
+# 이 키는 "이 MCP 서버 자체에 접근할 수 있는 사람인가"만 판별한다.
+# RateLimitMiddleware보다 먼저 실행해 인증 실패 요청이 rate limit 카운터를
+# 소모하지 않도록 한다(무단 접속 시도로 정상 사용자가 차단당하는 것을 방지).
+# /mcp와 /api/dashboard(PWA 대시보드용 REST 엔드포인트) 둘 다 적용 대상이다 —
+# 대시보드가 무인증으로 열려 있으면 /mcp 쪽을 막는 의미가 없어지기 때문.
+AUTH_PROTECTED_PATHS = ("/mcp", "/api/dashboard")
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        if not any(request.url.path.startswith(p) for p in AUTH_PROTECTED_PATHS):
+            return await call_next(request)
+
+        expected_key = os.environ.get("MCP_ACCESS_KEY")
+        if not expected_key:
+            return JSONResponse(
+                {"error": "server_misconfigured", "message": "MCP_ACCESS_KEY가 설정되지 않았습니다."},
+                status_code=500,
+            )
+
+        provided_key = request.query_params.get("key", "")
+        if not provided_key or not hmac.compare_digest(provided_key, expected_key):
+            return JSONResponse(
+                {"error": "unauthorized", "message": "인증 실패: 올바른 ?key=가 필요합니다."},
+                status_code=401,
+            )
+
+        return await call_next(request)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -374,7 +412,85 @@ async def get_uv_index(
     }
 
 
-app = mcp.http_app(stateless_http=True, middleware=[Middleware(RateLimitMiddleware)])
+# ---------------------------------------------------------------------------
+# PWA 대시보드 전용 REST 엔드포인트 (MCP 도구가 아닌 일반 HTTP API)
+#
+# GPS 좌표 -> 카카오 리버스 지오코딩으로 행정동 이름 획득 -> area_codes.json
+# 매칭으로 areaNo 확정 -> 자외선지수/대기정체지수/실측 자외선지수를 한 번에
+# 모아서 반환한다. 카카오 API 키는 서버에만 있고 브라우저에는 노출되지 않는다.
+# ---------------------------------------------------------------------------
+
+async def dashboard_endpoint(request: Request) -> JSONResponse:
+    try:
+        lat = float(request.query_params.get("lat", ""))
+        lon = float(request.query_params.get("lon", ""))
+    except (TypeError, ValueError):
+        return JSONResponse({"error": True, "message": "lat, lon 쿼리 파라미터가 필요합니다."}, status_code=400)
+
+    try:
+        geo = await reverse_geocode(lat, lon)
+    except KakaoGeocodeApiError as e:
+        return JSONResponse({"error": True, "message": e.message}, status_code=502)
+
+    area_no, resolution_note = _resolve_area(None, geo["area_name"])
+    if area_no is None:
+        return JSONResponse(
+            {"error": True, "message": resolution_note.get("message"), "geo": geo},
+            status_code=404,
+        )
+
+    uv_result = None
+    uv_error = None
+    try:
+        uv_result = await fetch_uv_forecast(area_no=area_no)
+    except LivingWeatherApiError as e:
+        uv_error = {"resultCode": e.result_code, "resultMsg": e.result_msg}
+
+    air_result = None
+    air_error = None
+    try:
+        air_result = await fetch_air_diffusion_forecast(area_no=area_no)
+    except LivingWeatherApiError as e:
+        air_error = {"resultCode": e.result_code, "resultMsg": e.result_msg}
+
+    uv_now_result = None
+    uv_now_error = None
+    try:
+        safemap = await fetch_uv_index(sido=geo["sido"], sigungu=geo["sigungu"], num_of_rows=300)
+        items = safemap.get("items") or []
+        uv_now_result = items[0] if items else None
+    except SafemapApiError as e:
+        uv_now_error = {"resultCode": e.result_code, "resultMsg": e.result_msg}
+
+    return JSONResponse({
+        "area": {
+            "areaNo": area_no,
+            "areaName": geo["area_name"],
+            "sido": geo["sido"],
+            "sigungu": geo["sigungu"],
+            "dong": geo["dong"],
+        },
+        "uv_forecast": uv_result,
+        "uv_forecast_error": uv_error,
+        "air_diffusion_forecast": air_result,
+        "air_diffusion_forecast_error": air_error,
+        "uv_now": uv_now_result,
+        "uv_now_error": uv_now_error,
+        "generated_at": time.time(),
+    })
+
+
+extra_routes = [Route("/api/dashboard", dashboard_endpoint, methods=["GET"])]
+
+app = mcp.http_app(
+    stateless_http=True,
+    middleware=[
+        Middleware(AuthMiddleware),
+        Middleware(RateLimitMiddleware),
+        Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"]),
+    ],
+)
+app.router.routes.extend(extra_routes)
 
 
 if __name__ == "__main__":

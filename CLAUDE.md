@@ -106,6 +106,24 @@ def _safe_float(v):
 - OPTIONS 요청은 rate limit 카운팅에서 제외
 - 분당 3회 / 1시간 5회 위반 시 24시간 차단 / 일일 30회 상한
 
+### 접근 인증 (2026-08-24 추가)
+
+이 서버는 원래 인증 없이 URL만 알면 접근 가능했으나(코드 주석에도 "인증이
+필요 없는 공개 서버"로 명시돼 있었음), 타인의 접속을 완전히 차단하기 위해
+`AuthMiddleware`를 추가했다.
+
+- `MCP_ACCESS_KEY`: 이 서버 자체 접근용 전용 비밀키. `KMA_LIVING_WEATHER_SERVICE_KEY`·
+  `SAFEMAP_API_KEY`(둘 다 업스트림 API 호출용)와는 목적이 다른 별개 키다.
+- 요청의 `?key=` 값을 `hmac.compare_digest`로 `MCP_ACCESS_KEY`와 비교, 불일치/누락
+  시 401.
+- `/mcp`뿐 아니라 `/api/dashboard`(PWA 대시보드용 REST 엔드포인트)도 인증 대상.
+  대시보드만 무인증으로 열려 있으면 `/mcp` 인증이 무의미해지기 때문.
+- `AuthMiddleware`는 `RateLimitMiddleware`보다 먼저 실행되도록 `middleware=[...]`
+  리스트에서 앞에 위치시킨다(Starlette 미들웨어 리스트는 첫 항목이 가장 바깥쪽 =
+  가장 먼저 실행). 인증 실패 요청이 rate limit 카운터를 소모하지 않게 하기 위함.
+- `fly.toml`은 이 시점부터 `.gitignore` 처리 — 앱 이름(`app = '...'`)을 GitHub에
+  커밋하지 않는다. 로컬 fly.toml에서 실제 앱 이름을 확인할 것.
+
 ### area_codes.json 재사용
 
 기존 `safemap-uv-index-mcp` 프로젝트의 `area_codes.json`을 그대로 복사해서
@@ -135,5 +153,7 @@ def _safe_float(v):
 - `stateless_http=True` 누락 금지
 - `fly launch` / `fly secrets set` / `flyctl deploy` / `fly logs` 자동 실행 금지
 - rate limit 미들웨어 누락 금지
+- `AuthMiddleware` 누락 금지, `/mcp`·`/api/dashboard` 중 하나라도 인증에서 빠뜨리지 않기
+- `MCP_ACCESS_KEY` 값을 코드/문서/커밋에 하드코딩하지 않기 (환경변수로만 참조)
 - 자외선지수(h0~h75)와 대기정체지수(h3~h78)의 시간 필드 범위를 혼동해서 같은
   파싱 로직을 억지로 공유하지 않기 — 별도 상수/딕셔너리로 명확히 구분

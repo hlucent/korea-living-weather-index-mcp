@@ -84,3 +84,31 @@
   프로젝트는 코드 유지, 신규 확장 없음).
 - 정지 시점 도달: 코드 구현 + 로컬 실측 테스트 완료. fly.io 배포는 사용자가
   직접 진행 필요 (CLAUDE.md 절대 규칙에 따름).
+
+
+## 2026-08-24 — fly.io 앱 주소 변경 (보안 강화)
+
+기존 fly.io 앱이 GitHub 저장소명과 동일하거나 유사한 이름으로 배포되어 있어, 저장소명만
+보면 실제 서비스 URL을 그대로 유추할 수 있는 상태였다. 이를 막기 위해 fly.io 앱을 랜덤
+접미사가 붙은 새 이름(living-i8tohv)으로 재배포하고, 기존 앱(korea-living-weather-index-mcp)은
+fly apps destroy로 완전히 삭제했다. fly.toml의 app 값과 README의 URL도 신주소 기준으로
+갱신했다.
+
+- 추가로: 이 서버는 `RateLimitMiddleware`만 있고 인증 로직이 없어 "URL만 알면 누구나
+  전체 기능에 접근 가능"한 상태였음(코드 레벨에서도 "인증이 필요 없는 공개 서버"로
+  명시돼 있었음). URL 은닉만으로는 "타인의 접속 완전 차단"이 근본적으로 해결되지
+  않는다고 판단해 `AuthMiddleware`를 새로 추가함:
+  - `MCP_ACCESS_KEY`(이 서버 자체 접근용 전용 비밀키, `KMA_LIVING_WEATHER_SERVICE_KEY`·
+    `SAFEMAP_API_KEY`와는 별개)를 서버가 fly secrets로 보유하고, 요청의 `?key=` 값과
+    `hmac.compare_digest`로 비교.
+  - `/mcp`와 `/api/dashboard`(PWA 대시보드용 REST 엔드포인트) 둘 다 인증 대상에 포함.
+    대시보드가 무인증으로 열려 있으면 `/mcp` 쪽을 막는 의미가 없어지기 때문.
+  - `AuthMiddleware`를 `RateLimitMiddleware`보다 앞 순서로 등록해, 인증 실패 요청이
+    rate limit 카운터를 소모해 정상 사용자가 차단되는 상황을 방지.
+  - 로컬 실측: `/mcp`, `/api/dashboard` 각각 키 없음/틀린 키 401, 올바른 키 통과(이후
+    단계로 진행되어 405/502 응답 — 인증 자체는 정상 통과) 확인.
+  - `living-weather-dashboard-pwa/app.js`의 `/api/dashboard` 호출부도 `?key=` 파라미터를
+    붙이도록 함께 수정 (이 PWA는 별도 git 저장소가 아닌 로컬 전용 폴더).
+  - fly.toml은 이 시점부터 .gitignore 처리 — 앱 이름을 GitHub에 올리지 않음.
+- 정지 시점 도달: 코드 구현 + 로컬 실측 테스트 완료. `fly secrets set`, `flyctl deploy`는
+  사용자가 직접 진행 필요 (CLAUDE.md 절대 규칙에 따름).

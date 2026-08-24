@@ -65,6 +65,7 @@ python server.py
 |---|---|
 | `KMA_LIVING_WEATHER_SERVICE_KEY` | 공공데이터포털에서 발급받은 "기상청_생활기상지수 조회서비스(4.0)" 일반 인증키(Decoding) |
 | `SAFEMAP_API_KEY` | 행정안전부 생활안전지도(IF_0113) 오픈API 인증키 |
+| `MCP_ACCESS_KEY` | (2026-08-24 추가) 이 MCP 서버 자체에 접근하기 위한 전용 비밀키. 위 두 키와 달리 업스트림 API 호출용이 아니라, `/mcp`·`/api/dashboard` 요청의 `?key=` 값과 대조해 인증하는 용도. 직접 생성한 임의의 긴 문자열을 사용할 것 (예: `openssl rand -hex 32`). |
 
 ## 배포
 
@@ -72,12 +73,14 @@ fly.io에 배포합니다. 자세한 절차는 프로젝트 부트스트랩 문�
 
 ```bash
 fly launch --no-deploy
-fly secrets set KMA_LIVING_WEATHER_SERVICE_KEY=발급받은키 SAFEMAP_API_KEY=발급받은키
+fly secrets set KMA_LIVING_WEATHER_SERVICE_KEY=발급받은키 SAFEMAP_API_KEY=발급받은키 MCP_ACCESS_KEY=본인이_생성한_전용비밀키
 flyctl deploy
 ```
 
-배포 후 커넥터 연결 시 `/mcp` 경로를 붙여서 연결합니다:
-`https://<앱이름>.fly.dev/mcp`
+배포 후 커넥터 연결 시 `/mcp` 경로에 `?key=`를 붙여서 연결합니다 (2026-08-24부터 인증 필수):
+`https://<앱이름>.fly.dev/mcp?key=본인의_MCP_ACCESS_KEY`
+
+`/api/dashboard`(PWA 대시보드용 REST 엔드포인트)도 동일하게 `?key=`가 필요합니다. 이 서버는 코드 레벨에서 "인증이 필요 없는 공개 서버"로 되어 있었으나(주석 참고), URL만 알면 누구나 접근 가능한 상태였기 때문에 `MCP_ACCESS_KEY` 인증을 추가했습니다.
 
 ## 데이터 출처
 
