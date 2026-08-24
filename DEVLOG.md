@@ -134,3 +134,14 @@ fly apps destroy로 완전히 삭제했다. fly.toml의 app 값과 README의 URL
   - fly.toml은 이 시점부터 .gitignore 처리 — 앱 이름을 GitHub에 올리지 않음.
 - 정지 시점 도달: 코드 구현 + 로컬 실측 테스트 완료. `fly secrets set`, `flyctl deploy`는
   사용자가 직접 진행 필요 (CLAUDE.md 절대 규칙에 따름).
+
+## 2026-08-25 — rate limit 완화 (개인 전용 기준)
+
+MCP_ACCESS_KEY 인증이 이미 걸려 있으니, rate limit을 "실수로 계속 호출해도 안
+막히는 수준"의 개인 전용 기준으로 완화했다.
+- MINUTE_LIMIT: 3 → 30
+- HOUR_VIOLATION_LIMIT: 5 → 20 (BLOCK_DURATION 24시간은 유지)
+- DAILY_LIMIT: 30 → 1000
+로컬 테스트: 같은 키로 32회 연속 호출 → 31번째 요청에서 처음 429 확인(30회까지 정상 통과).
+README.md/CLAUDE.md의 rate limit 안내 문구도 새 값으로 갱신. 배포(`flyctl deploy`)는
+사용자가 직접 진행 필요.

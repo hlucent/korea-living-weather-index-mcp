@@ -41,15 +41,17 @@ load_dotenv()
 mcp = FastMCP("korea-living-weather-index-mcp")
 
 # ---------------------------------------------------------------------------
-# Rate limit: 분당 3회 / 1시간 5회 위반 시 24시간 차단, 일일 30회 상한
+# Rate limit: 분당 30회 / 1시간 20회 위반 시 24시간 차단, 일일 1000회 상한
+# 2026-08-25부터 개인 전용 사용 기준으로 완화(?key= 인증이 이미 걸려 있어
+# rate limit은 실수로 반복 호출해도 안 막히는 수준이면 충분).
 # ---------------------------------------------------------------------------
 
-MINUTE_LIMIT = 3
+MINUTE_LIMIT = 30
 MINUTE_WINDOW = 60
-HOUR_VIOLATION_LIMIT = 5
+HOUR_VIOLATION_LIMIT = 20
 HOUR_WINDOW = 3600
 BLOCK_DURATION = 24 * 3600
-DAILY_LIMIT = 30
+DAILY_LIMIT = 1000
 DAY_WINDOW = 24 * 3600
 
 _rate_limit_lock = threading.Lock()
