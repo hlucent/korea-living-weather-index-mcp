@@ -145,3 +145,7 @@ MCP_ACCESS_KEY 인증이 이미 걸려 있으니, rate limit을 "실수로 계�
 로컬 테스트: 같은 키로 32회 연속 호출 → 31번째 요청에서 처음 429 확인(30회까지 정상 통과).
 README.md/CLAUDE.md의 rate limit 안내 문구도 새 값으로 갱신. 배포(`flyctl deploy`)는
 사용자가 직접 진행 필요.
+
+## 2026-08-29 — OAuth discovery 스텁 제거 (v14 표준 정합화)
+v14 복귀 검증(VERIFY-v14-REPORT.md) 과정에서 워킹트리에 이미 존재하던 OAuth discovery
+스텁 제거 편집을 확인 후 커밋. 인증/rate limit 로직은 기존 그대로 유지됨.
