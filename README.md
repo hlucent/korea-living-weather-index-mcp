@@ -62,21 +62,54 @@ cp .env.example .env  # KMA_LIVING_WEATHER_SERVICE_KEY, SAFEMAP_API_KEY 값 입�
 python server.py
 ```
 
-### Claude Desktop 연동
+### 설치 방법
 
-`claude_desktop_config.json`의 `mcpServers`에 아래처럼 등록합니다
-(Python 실행 경로는 사용자 환경에 맞게 확인할 것):
+#### 1. Claude Code (CLI)
+
+```bash
+claude mcp add korea-living-weather-index-mcp -- python <프로젝트 경로>/server.py --scope user
+```
+
+`--scope user`로 등록하면 어느 폴더에서 작업하든 이 MCP 도구를 사용할 수
+있습니다.
+
+#### 2. Claude Desktop
+
+`claude_desktop_config.json`의 `mcpServers`에 아래 항목을 추가합니다:
 
 ```json
 {
   "mcpServers": {
-    "korea-living-weather-index": {
-      "command": "python",
-      "args": ["/absolute/path/to/server.py"]
+    "korea-living-weather-index-mcp": {
+      "command": "<python 절대경로>",
+      "args": ["<프로젝트 경로>/server.py"]
     }
   }
 }
 ```
+
+**주의사항**
+
+- `"command"`에 그냥 `"python"`만 쓰면 실패할 수 있습니다. PATH의 `python`과
+  실제로 `fastmcp` 등 패키지가 설치된 python이 다른 경우가 있기 때문입니다
+  (Windows에서 흔함).
+- 아래 명령으로 실제 패키지가 설치된 python의 절대경로를 먼저 확인하세요:
+
+  ```bash
+  python -c "import sys; print(sys.executable)"
+  ```
+
+  이 절대경로를 `"command"`에 직접 지정하는 것을 권장합니다.
+- 설정 변경 후 Claude Desktop을 완전히 종료(작업 관리자에서 프로세스 확인
+  포함)한 뒤 재시작해야 반영됩니다.
+- 연결이 안 되면 Claude Desktop 개발자 설정 → 로컬 MCP 서버 → 해당 서버 →
+  "로그 보기"에서 `Using MCP server command: <경로>` 로그와 그 아래
+  에러(Traceback)를 확인하면 원인이 바로 드러납니다.
+
+#### 3. Claude.ai 웹 / Cowork
+
+이 서버는 로컬 전용 stdio 방식이므로 claude.ai 웹이나 Cowork에서는 직접
+연결할 수 없습니다. Claude Code 또는 Claude Desktop에서만 사용 가능합니다.
 
 ## 환경변수
 

@@ -157,3 +157,10 @@ v14 복귀 검증(VERIFY-v14-REPORT.md) 과정에서 워킹트리에 이미 존�
 - /api/dashboard(PWA 대시보드) 완전 삭제 — 사용하지 않기로 결정
 - fly.toml, Dockerfile, .dockerignore 제거
 - fly.io 앱(living-i8tohv)은 별도로 사용자가 직접 삭제 예정
+
+## 2026-09-15 설치 안내 정비
+
+- README.md에 Claude Code / Claude Desktop 설치 방법 추가
+- claude.ai 웹·Cowork는 로컬 stdio 서버 특성상 직접 연결 불가함을 명시
+- Claude Desktop 설치 시 python 실행 경로 불일치로 인한 연결 실패 사례와
+  해결법(python 절대경로 확인 후 지정) 안내 추가
