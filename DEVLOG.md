@@ -149,3 +149,11 @@ README.md/CLAUDE.md의 rate limit 안내 문구도 새 값으로 갱신. 배포(
 ## 2026-08-29 — OAuth discovery 스텁 제거 (v14 표준 정합화)
 v14 복귀 검증(VERIFY-v14-REPORT.md) 과정에서 워킹트리에 이미 존재하던 OAuth discovery
 스텁 제거 편집을 확인 후 커밋. 인증/rate limit 로직은 기존 그대로 유지됨.
+
+## 2026-09-14 로컬 전용(stdio) 전환
+
+- fly.io HTTP 배포 → stdio 로컬 전용 서버로 전환
+- MCP_ACCESS_KEY 인증, rate limit 미들웨어 제거 (로컬 전용이므로 불필요)
+- /api/dashboard(PWA 대시보드) 완전 삭제 — 사용하지 않기로 결정
+- fly.toml, Dockerfile, .dockerignore 제거
+- fly.io 앱(living-i8tohv)은 별도로 사용자가 직접 삭제 예정

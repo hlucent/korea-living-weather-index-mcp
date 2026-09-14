@@ -7,12 +7,9 @@
 - 불확실하면 추측성 재설계 대신 기본값 1개로 구현 후 DEVLOG.md에 "확인 필요"로
   기록.
 - 동일 오류 최대 3회까지만 재시도. 3회 실패 시 기록하고 사용자에게 보고.
-- **역할은 "코드 구현 + 로컬 실측 테스트"까지다.** `fly launch`, `fly secrets
-  set`, `flyctl deploy`, `fly logs` 등 fly.io 관련 명령은 절대 스스로 실행하지
-  않는다.
-- 배포 준비(코드 구현, 로컬 테스트, git commit/push)가 끝나면 아래 "작업
-  순서"의 정지 시점에서 멈추고, 사용자에게 PowerShell에서 `fly launch
-  --no-deploy`부터 진행하도록 안내한다.
+- 이 프로젝트는 **로컬 전용(stdio) MCP 서버**다. HTTP 배포, fly.io 관련 명령
+  (`fly launch`, `fly secrets set`, `flyctl deploy`, `fly logs` 등)은 대상이
+  아니며 실행하지 않는다.
 
 ## 이 프로젝트 고유 사항
 
@@ -99,33 +96,12 @@ def _safe_float(v):
         return None
 ```
 
-### IP 추출 / Rate limit / CORS preflight
+### 트랜스포트 (2026-09-14 로컬 전용 전환)
 
-프로젝트 지침 2-2절, 2-7절의 표준 코드를 그대로 적용한다:
-- `Fly-Client-IP` 헤더 최우선 신뢰, `X-Forwarded-For`는 폴백
-- OPTIONS 요청은 rate limit 카운팅에서 제외
-- 분당 30회 / 1시간 20회 위반 시 24시간 차단 / 일일 1000회 상한
-  (2026-08-25부터 개인 전용 사용 기준으로 완화. `MCP_ACCESS_KEY` 인증이 이미
-  걸려 있어, rate limit은 실수로 반복 호출해도 안 막히는 수준이면 충분하다고
-  판단해 3/5/30에서 완화함)
-
-### 접근 인증 (2026-08-24 추가)
-
-이 서버는 원래 인증 없이 URL만 알면 접근 가능했으나(코드 주석에도 "인증이
-필요 없는 공개 서버"로 명시돼 있었음), 타인의 접속을 완전히 차단하기 위해
-`AuthMiddleware`를 추가했다.
-
-- `MCP_ACCESS_KEY`: 이 서버 자체 접근용 전용 비밀키. `KMA_LIVING_WEATHER_SERVICE_KEY`·
-  `SAFEMAP_API_KEY`(둘 다 업스트림 API 호출용)와는 목적이 다른 별개 키다.
-- 요청의 `?key=` 값을 `hmac.compare_digest`로 `MCP_ACCESS_KEY`와 비교, 불일치/누락
-  시 401.
-- `/mcp`뿐 아니라 `/api/dashboard`(PWA 대시보드용 REST 엔드포인트)도 인증 대상.
-  대시보드만 무인증으로 열려 있으면 `/mcp` 인증이 무의미해지기 때문.
-- `AuthMiddleware`는 `RateLimitMiddleware`보다 먼저 실행되도록 `middleware=[...]`
-  리스트에서 앞에 위치시킨다(Starlette 미들웨어 리스트는 첫 항목이 가장 바깥쪽 =
-  가장 먼저 실행). 인증 실패 요청이 rate limit 카운터를 소모하지 않게 하기 위함.
-- `fly.toml`은 이 시점부터 `.gitignore` 처리 — 앱 이름(`app = '...'`)을 GitHub에
-  커밋하지 않는다. 로컬 fly.toml에서 실제 앱 이름을 확인할 것.
+로컬 전용 stdio 서버로 운영한다 — `mcp.run()`이 기본 stdio 트랜스포트를
+사용한다. HTTP 트랜스포트, 인증 미들웨어(`MCP_ACCESS_KEY`), rate limit
+미들웨어, `/api/dashboard` REST 엔드포인트는 모두 제거되었다(로컬 프로세스로만
+접근하므로 불필요). 관련 배경은 DEVLOG.md 참고.
 
 ### area_codes.json 재사용
 
@@ -138,25 +114,16 @@ def _safe_float(v):
 
 1. `requirements.txt` (`fastmcp`, `httpx`, `python-dotenv`)
 2. `kma_living_weather_api.py` — API 호출 + 에러코드 매핑(JSON 우선, XML 폴백)
-3. `server.py` — 3개 툴(`get_uv_forecast`, `get_air_diffusion_forecast`,
-   `search_area_code`) 정의, docstring에 필드/단위/등급 명시,
-   `stateless_http=True` 필수, rate limit 미들웨어 포함
+3. `server.py` — 툴(`get_uv_forecast`, `get_air_diffusion_forecast`,
+   `search_area_code`, `get_uv_index`) 정의, docstring에 필드/단위/등급 명시,
+   `mcp.run()`(stdio) 사용
 4. `area_codes.json` 배치, `.env.example`, `.gitignore`
 5. 로컬 테스트 (실제 키로 각 툴 호출, 위 "실측 필요 항목" 전부 확인)
-6. FastMCP 스모크 테스트 (initialize 요청까지만)
-7. `Dockerfile`, `fly.toml` (프로젝트 지침 6절 표준 템플릿 그대로 사용)
-8. README/DEVLOG 갱신 (실측 결과를 실제 동작 기준으로 반영)
-9. git add/commit/push
-10. **여기서 정지** — 사용자에게 PowerShell 배포 절차 안내
+6. README/DEVLOG 갱신 (실측 결과를 실제 동작 기준으로 반영)
+7. git add/commit/push
 
 ## 하지 말 것
 
-- 툴 개수를 3개보다 늘리지 않기 (DEVPLAN.md 3절 범위 고정)
 - 인증키 하드코딩 금지
-- `stateless_http=True` 누락 금지
-- `fly launch` / `fly secrets set` / `flyctl deploy` / `fly logs` 자동 실행 금지
-- rate limit 미들웨어 누락 금지
-- `AuthMiddleware` 누락 금지, `/mcp`·`/api/dashboard` 중 하나라도 인증에서 빠뜨리지 않기
-- `MCP_ACCESS_KEY` 값을 코드/문서/커밋에 하드코딩하지 않기 (환경변수로만 참조)
 - 자외선지수(h0~h75)와 대기정체지수(h3~h78)의 시간 필드 범위를 혼동해서 같은
   파싱 로직을 억지로 공유하지 않기 — 별도 상수/딕셔너리로 명확히 구분
