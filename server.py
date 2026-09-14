@@ -7,22 +7,13 @@
   (safemap-uv-index-mcp에서 이식. areaNo 코드 체계를 쓰지 않는 별개 API임에 주의)
 """
 
-import hmac
 import os
-import time
 import json
 import difflib
-import threading
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP
-from starlette.middleware import Middleware
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.middleware.cors import CORSMiddleware
-from starlette.requests import Request
-from starlette.responses import JSONResponse
-from starlette.routing import Route
 
 from kma_living_weather_api import (
     fetch_uv_forecast,
@@ -34,126 +25,10 @@ from safemap_api import (
     SafemapApiError,
     _safe_int,
 )
-from kakao_geocode_api import reverse_geocode, KakaoGeocodeApiError
 
 load_dotenv()
 
 mcp = FastMCP("korea-living-weather-index-mcp")
-
-# ---------------------------------------------------------------------------
-# Rate limit: 분당 30회 / 1시간 20회 위반 시 24시간 차단, 일일 1000회 상한
-# 2026-08-25부터 개인 전용 사용 기준으로 완화(?key= 인증이 이미 걸려 있어
-# rate limit은 실수로 반복 호출해도 안 막히는 수준이면 충분).
-# ---------------------------------------------------------------------------
-
-MINUTE_LIMIT = 30
-MINUTE_WINDOW = 60
-HOUR_VIOLATION_LIMIT = 20
-HOUR_WINDOW = 3600
-BLOCK_DURATION = 24 * 3600
-DAILY_LIMIT = 1000
-DAY_WINDOW = 24 * 3600
-
-_rate_limit_lock = threading.Lock()
-_minute_buckets: dict[str, list[float]] = {}
-_violation_buckets: dict[str, list[float]] = {}
-_daily_buckets: dict[str, list[float]] = {}
-_blocked_until: dict[str, float] = {}
-
-
-def _get_client_ip(request: Request) -> str:
-    fly_client_ip = request.headers.get("fly-client-ip")
-    if fly_client_ip:
-        return fly_client_ip.strip()
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
-
-
-# 서버 전용 접근 비밀키(MCP_ACCESS_KEY) 검사.
-# KMA_LIVING_WEATHER_SERVICE_KEY(기상청 업스트림 API 호출용)와는 별개의 키다 —
-# 이 키는 "이 MCP 서버 자체에 접근할 수 있는 사람인가"만 판별한다.
-# RateLimitMiddleware보다 먼저 실행해 인증 실패 요청이 rate limit 카운터를
-# 소모하지 않도록 한다(무단 접속 시도로 정상 사용자가 차단당하는 것을 방지).
-# /mcp와 /api/dashboard(PWA 대시보드용 REST 엔드포인트) 둘 다 적용 대상이다 —
-# 대시보드가 무인증으로 열려 있으면 /mcp 쪽을 막는 의미가 없어지기 때문.
-AUTH_PROTECTED_PATHS = ("/mcp", "/api/dashboard")
-
-
-class AuthMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        if request.method == "OPTIONS":
-            return await call_next(request)
-        if not any(request.url.path.startswith(p) for p in AUTH_PROTECTED_PATHS):
-            return await call_next(request)
-
-        expected_key = os.environ.get("MCP_ACCESS_KEY")
-        if not expected_key:
-            return JSONResponse(
-                {"error": "server_misconfigured", "message": "MCP_ACCESS_KEY가 설정되지 않았습니다."},
-                status_code=500,
-            )
-
-        provided_key = request.query_params.get("key", "")
-        if not provided_key or not hmac.compare_digest(provided_key, expected_key):
-            return JSONResponse(
-                {"error": "unauthorized", "message": "인증 실패: 올바른 ?key=가 필요합니다."},
-                status_code=401,
-            )
-
-        return await call_next(request)
-
-
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        if request.method == "OPTIONS":
-            return await call_next(request)
-
-        ip = _get_client_ip(request)
-        now = time.time()
-
-        with _rate_limit_lock:
-            blocked_at = _blocked_until.get(ip)
-            if blocked_at and now < blocked_at:
-                return JSONResponse(
-                    {"error": "blocked", "message": "Temporarily blocked due to rate limit violations."},
-                    status_code=429,
-                )
-
-            daily = _daily_buckets.setdefault(ip, [])
-            day_cutoff = now - DAY_WINDOW
-            while daily and daily[0] < day_cutoff:
-                daily.pop(0)
-            if len(daily) >= DAILY_LIMIT:
-                return JSONResponse(
-                    {"error": "daily_limit_exceeded", "message": "Daily request limit exceeded."},
-                    status_code=429,
-                )
-
-            minute = _minute_buckets.setdefault(ip, [])
-            minute_cutoff = now - MINUTE_WINDOW
-            while minute and minute[0] < minute_cutoff:
-                minute.pop(0)
-
-            if len(minute) >= MINUTE_LIMIT:
-                violations = _violation_buckets.setdefault(ip, [])
-                hour_cutoff = now - HOUR_WINDOW
-                while violations and violations[0] < hour_cutoff:
-                    violations.pop(0)
-                violations.append(now)
-                if len(violations) >= HOUR_VIOLATION_LIMIT:
-                    _blocked_until[ip] = now + BLOCK_DURATION
-                return JSONResponse(
-                    {"error": "rate_limit_exceeded", "message": "Too many requests. Please try again later."},
-                    status_code=429,
-                )
-
-            minute.append(now)
-            daily.append(now)
-
-        return await call_next(request)
-
 
 # ---------------------------------------------------------------------------
 # 지점코드 검색
@@ -414,89 +289,5 @@ async def get_uv_index(
     }
 
 
-# ---------------------------------------------------------------------------
-# PWA 대시보드 전용 REST 엔드포인트 (MCP 도구가 아닌 일반 HTTP API)
-#
-# GPS 좌표 -> 카카오 리버스 지오코딩으로 행정동 이름 획득 -> area_codes.json
-# 매칭으로 areaNo 확정 -> 자외선지수/대기정체지수/실측 자외선지수를 한 번에
-# 모아서 반환한다. 카카오 API 키는 서버에만 있고 브라우저에는 노출되지 않는다.
-# ---------------------------------------------------------------------------
-
-async def dashboard_endpoint(request: Request) -> JSONResponse:
-    try:
-        lat = float(request.query_params.get("lat", ""))
-        lon = float(request.query_params.get("lon", ""))
-    except (TypeError, ValueError):
-        return JSONResponse({"error": True, "message": "lat, lon 쿼리 파라미터가 필요합니다."}, status_code=400)
-
-    try:
-        geo = await reverse_geocode(lat, lon)
-    except KakaoGeocodeApiError as e:
-        return JSONResponse({"error": True, "message": e.message}, status_code=502)
-
-    area_no, resolution_note = _resolve_area(None, geo["area_name"])
-    if area_no is None:
-        return JSONResponse(
-            {"error": True, "message": resolution_note.get("message"), "geo": geo},
-            status_code=404,
-        )
-
-    uv_result = None
-    uv_error = None
-    try:
-        uv_result = await fetch_uv_forecast(area_no=area_no)
-    except LivingWeatherApiError as e:
-        uv_error = {"resultCode": e.result_code, "resultMsg": e.result_msg}
-
-    air_result = None
-    air_error = None
-    try:
-        air_result = await fetch_air_diffusion_forecast(area_no=area_no)
-    except LivingWeatherApiError as e:
-        air_error = {"resultCode": e.result_code, "resultMsg": e.result_msg}
-
-    uv_now_result = None
-    uv_now_error = None
-    try:
-        safemap = await fetch_uv_index(sido=geo["sido"], sigungu=geo["sigungu"], num_of_rows=300)
-        items = safemap.get("items") or []
-        uv_now_result = items[0] if items else None
-    except SafemapApiError as e:
-        uv_now_error = {"resultCode": e.result_code, "resultMsg": e.result_msg}
-
-    return JSONResponse({
-        "area": {
-            "areaNo": area_no,
-            "areaName": geo["area_name"],
-            "sido": geo["sido"],
-            "sigungu": geo["sigungu"],
-            "dong": geo["dong"],
-        },
-        "uv_forecast": uv_result,
-        "uv_forecast_error": uv_error,
-        "air_diffusion_forecast": air_result,
-        "air_diffusion_forecast_error": air_error,
-        "uv_now": uv_now_result,
-        "uv_now_error": uv_now_error,
-        "generated_at": time.time(),
-    })
-
-
-extra_routes = [Route("/api/dashboard", dashboard_endpoint, methods=["GET"])]
-
-app = mcp.http_app(
-    stateless_http=True,
-    middleware=[
-        Middleware(AuthMiddleware),
-        Middleware(RateLimitMiddleware),
-        Middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"]),
-    ],
-)
-app.router.routes.extend(extra_routes)
-
-
 if __name__ == "__main__":
-    import uvicorn
-
-    port = int(os.environ.get("PORT", 8080))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    mcp.run()

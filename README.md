@@ -53,10 +53,29 @@
 
 ## 설치 및 실행
 
+로컬 전용(stdio) MCP 서버입니다. HTTP 배포 없이 `python server.py`로 바로
+실행합니다.
+
 ```bash
 pip install -r requirements.txt
 cp .env.example .env  # KMA_LIVING_WEATHER_SERVICE_KEY, SAFEMAP_API_KEY 값 입력
 python server.py
+```
+
+### Claude Desktop 연동
+
+`claude_desktop_config.json`의 `mcpServers`에 아래처럼 등록합니다
+(Python 실행 경로는 사용자 환경에 맞게 확인할 것):
+
+```json
+{
+  "mcpServers": {
+    "korea-living-weather-index": {
+      "command": "python",
+      "args": ["/absolute/path/to/server.py"]
+    }
+  }
+}
 ```
 
 ## 환경변수
@@ -65,22 +84,6 @@ python server.py
 |---|---|
 | `KMA_LIVING_WEATHER_SERVICE_KEY` | 공공데이터포털에서 발급받은 "기상청_생활기상지수 조회서비스(4.0)" 일반 인증키(Decoding) |
 | `SAFEMAP_API_KEY` | 행정안전부 생활안전지도(IF_0113) 오픈API 인증키 |
-| `MCP_ACCESS_KEY` | (2026-08-24 추가) 이 MCP 서버 자체에 접근하기 위한 전용 비밀키. 위 두 키와 달리 업스트림 API 호출용이 아니라, `/mcp`·`/api/dashboard` 요청의 `?key=` 값과 대조해 인증하는 용도. 직접 생성한 임의의 긴 문자열을 사용할 것 (예: `openssl rand -hex 32`). |
-
-## 배포
-
-fly.io에 배포합니다. 자세한 절차는 프로젝트 부트스트랩 문서를 따릅니다.
-
-```bash
-fly launch --no-deploy
-fly secrets set KMA_LIVING_WEATHER_SERVICE_KEY=발급받은키 SAFEMAP_API_KEY=발급받은키 MCP_ACCESS_KEY=본인이_생성한_전용비밀키
-flyctl deploy
-```
-
-배포 후 커넥터 연결 시 `/mcp` 경로에 `?key=`를 붙여서 연결합니다 (2026-08-24부터 인증 필수):
-`https://<앱이름>.fly.dev/mcp?key=본인의_MCP_ACCESS_KEY`
-
-`/api/dashboard`(PWA 대시보드용 REST 엔드포인트)도 동일하게 `?key=`가 필요합니다. 이 서버는 코드 레벨에서 "인증이 필요 없는 공개 서버"로 되어 있었으나(주석 참고), URL만 알면 누구나 접근 가능한 상태였기 때문에 `MCP_ACCESS_KEY` 인증을 추가했습니다.
 
 ## 데이터 출처
 
@@ -103,10 +106,6 @@ flyctl deploy
   유지하고 있습니다.
 - 에러 응답도 `dataType=JSON` 요청 시 **JSON으로 옴**을 확인했습니다(XML
   아님). XML 폴백 파서는 안전장치로 남겨두었습니다.
-- Rate limit: 분당 30회(IP 기준), 1시간 내 20회 초과 시 24시간 차단, 일일 1000회
-  상한 (멀티 머신 배포 시 머신 수에 비례해 실질 완화될 수 있음). 2026-08-25부터
-  개인 전용 사용 기준으로 완화 — `?key=` 인증(MCP_ACCESS_KEY)이 이미 걸려 있어,
-  rate limit은 실수로 반복 호출해도 안 막히는 수준이면 충분하다고 판단.
 
 ## 관련 프로젝트
 
